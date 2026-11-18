@@ -55,6 +55,29 @@ class LiveAlert {
   }
 }
 
+class CommandResult {
+  final String command;
+  final String status;
+  final String detail;
+  final DateTime ts;
+
+  CommandResult({
+    required this.command,
+    required this.status,
+    required this.detail,
+    required this.ts,
+  });
+
+  factory CommandResult.fromJson(Map<String, dynamic> json) {
+    return CommandResult(
+      command: json['command'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      detail: json['detail'] as String? ?? '',
+      ts: DateTime.parse(json['ts'] as String).toLocal(),
+    );
+  }
+}
+
 class AlertEvent {
   final String eventId;
   final DateTime ts;

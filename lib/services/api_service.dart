@@ -28,6 +28,33 @@ class ApiService {
     }
   }
 
+  /// GET /api/device/ -> returns true if the Pi is currently connected to /ws/device/
+  Future<bool> fetchDeviceConnected() async {
+    final res = await http.get(_uri('/api/device/')).timeout(const Duration(seconds: 4));
+    if (res.statusCode != 200) return false;
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return data['connected'] == true;
+  }
+
+  /// POST /api/commands/ -> sends 'calibrate_camera' or 'calibrate_distance' to the Pi
+  Future<void> sendCommand(String command) async {
+    final res = await http
+        .post(
+          _uri('/api/commands/'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'command': command}),
+        )
+        .timeout(const Duration(seconds: 5));
+
+    if (res.statusCode == 202) return;
+
+    final body = res.body.isNotEmpty ? jsonDecode(res.body) : {};
+    final detail = body is Map && body['detail'] != null
+        ? body['detail'].toString()
+        : 'Command failed (${res.statusCode})';
+    throw Exception(detail);
+  }
+
   /// GET /api/events/?limit=50&kind=...
   Future<List<AlertEvent>> fetchEvents({String? kind, int limit = 50}) async {
     final query = <String, String>{'limit': '$limit'};

@@ -9,6 +9,8 @@ class WsService {
   final void Function(bool connected) onConnectionChanged;
   final void Function(PostureStatus status) onStatus;
   final void Function(LiveAlert alert) onAlert;
+  final void Function(bool piConnected) onDeviceChanged;
+  final void Function(CommandResult result) onCommandResult;
 
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
@@ -20,6 +22,8 @@ class WsService {
     required this.onConnectionChanged,
     required this.onStatus,
     required this.onAlert,
+    required this.onDeviceChanged,
+    required this.onCommandResult,
   });
 
   String get _wsUrl {
@@ -50,6 +54,10 @@ class WsService {
             onStatus(PostureStatus.fromJson(data));
           } else if (type == 'alert') {
             onAlert(LiveAlert.fromJson(data));
+          } else if (type == 'device') {
+            onDeviceChanged(data['connected'] == true);
+          } else if (type == 'command_result') {
+            onCommandResult(CommandResult.fromJson(data));
           }
         },
         onError: (_) => _scheduleReconnect(),
@@ -63,6 +71,7 @@ class WsService {
   void _scheduleReconnect() {
     if (_disposed) return;
     onConnectionChanged(false);
+    onDeviceChanged(false);
     _cleanupChannel();
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(const Duration(seconds: 3), connect);

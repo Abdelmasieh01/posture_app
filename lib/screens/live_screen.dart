@@ -1,9 +1,10 @@
-import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
+import 'package:material_ui/material_ui.dart';
 import '../models.dart';
+import '../services/api_service.dart';
 import '../services/ws_service.dart';
 
-/// Displays real-time posture status and alert banners over WebSocket.
+/// Displays real-time posture status, alert banners, Pi connection state, and calibration controls.
 class LiveScreen extends StatefulWidget {
   final String host;
   final bool soundEnabled;
@@ -23,8 +24,11 @@ class LiveScreen extends StatefulWidget {
 class _LiveScreenState extends State<LiveScreen> {
   WsService? _ws;
   bool _connected = false;
+  bool _piConnected = false;
+  bool _sendingCommand = false;
   PostureStatus? _status;
   LiveAlert? _activeAlert;
+  CommandResult? _lastCommandResult;
 
   @override
   void initState() {
@@ -63,7 +67,27 @@ class _LiveScreenState extends State<LiveScreen> {
         setState(() => _activeAlert = alert);
         _triggerFeedback();
       },
+      onDeviceChanged: (piOnline) {
+        if (mounted) setState(() => _piConnected = piOnline);
+      },
+      onCommandResult: (result) {
+        if (mounted) setState(() => _lastCommandResult = result);
+      },
     )..connect();
+  }
+
+  Future<void> _sendCalibration(String command) async {
+    setState(() => _sendingCommand = true);
+    try {
+      await ApiService(widget.host).sendCommand(command);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    } finally {
+      if (mounted) setState(() => _sendingCommand = false);
+    }
   }
 
   /// Play system alert sound and/or vibrate based on Settings.
@@ -89,6 +113,17 @@ class _LiveScreenState extends State<LiveScreen> {
     return Colors.orange.shade800;
   }
 
+  Color _calibrationStatusColor(String status) {
+    switch (status) {
+      case 'done':
+        return Colors.green;
+      case 'failed':
+        return Colors.red;
+      default:
+        return Colors.blue;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = _status;
@@ -96,20 +131,26 @@ class _LiveScreenState extends State<LiveScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Connection status pill
-        Row(
+        // Connection status pills (Server WS + Raspberry Pi)
+        Wrap(
+          spacing: 16,
+          runSpacing: 8,
           children: [
-            Icon(
-              Icons.circle,
-              size: 12,
-              color: _connected ? Colors.green : Colors.red,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.circle, size: 12, color: _connected ? Colors.green : Colors.red),
+                const SizedBox(width: 6),
+                Text(_connected ? 'Server (${widget.host})' : 'Reconnecting...'),
+              ],
             ),
-            const SizedBox(width: 8),
-            Text(
-              _connected
-                  ? 'Live (${widget.host})'
-                  : 'Reconnecting to ${widget.host}...',
-              style: Theme.of(context).textTheme.bodyMedium,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.circle, size: 12, color: _piConnected ? Colors.green : Colors.grey),
+                const SizedBox(width: 6),
+                Text(_piConnected ? 'Pi Online' : 'Pi Offline'),
+              ],
             ),
           ],
         ),
@@ -223,7 +264,72 @@ class _LiveScreenState extends State<LiveScreen> {
             ),
           ),
           const SizedBox(height: 12),
+        ],
 
+        // Remote Calibration Card
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Remote Calibration',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: (_piConnected && !_sendingCommand)
+                            ? () => _sendCalibration('calibrate_camera')
+                            : null,
+                        icon: const Icon(Icons.camera_alt),
+                        label: const Text('Camera'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: (_piConnected && !_sendingCommand)
+                            ? () => _sendCalibration('calibrate_distance')
+                            : null,
+                        icon: const Icon(Icons.straighten),
+                        label: const Text('Distance'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_lastCommandResult != null) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Chip(
+                        label: Text(
+                          _lastCommandResult!.status.toUpperCase(),
+                          style: const TextStyle(color: Colors.white, fontSize: 11),
+                        ),
+                        backgroundColor: _calibrationStatusColor(_lastCommandResult!.status),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _lastCommandResult!.detail.isNotEmpty
+                              ? _lastCommandResult!.detail
+                              : _lastCommandResult!.command,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+
+        if (status != null) ...[
+          const SizedBox(height: 12),
           Text(
             'Last update: ${status.ts.hour.toString().padLeft(2, '0')}:${status.ts.minute.toString().padLeft(2, '0')}:${status.ts.second.toString().padLeft(2, '0')}',
             textAlign: TextAlign.center,
