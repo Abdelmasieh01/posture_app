@@ -25,16 +25,6 @@ jobs:
           java-version: '17'
           cache: 'gradle' # Caches Gradle wrapper and dependencies
 
-      - name: Cache Android NDK & CMake
-        uses: actions/cache@v6
-        with:
-          path: |
-            /usr/local/lib/android/sdk/ndk
-            /usr/local/lib/android/sdk/cmake
-          key: ${{ runner.os }}-android-ndk-cmake-${{ hashFiles('android/app/build.gradle*') }}
-          restore-keys: |
-            ${{ runner.os }}-android-ndk-cmake-
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
