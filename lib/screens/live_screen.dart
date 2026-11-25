@@ -1,10 +1,13 @@
-import 'package:flutter/services.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
+import 'package:vibration/vibration.dart';
 import '../models.dart';
 import '../services/api_service.dart';
 import '../services/ws_service.dart';
 
-/// Displays real-time posture status, alert banners, Pi connection state, and calibration controls.
+/// Displays real-time posture status, alert banners (with snapshot preview),
+/// start/end audio + vibration feedback, Pi connection state, and calibration controls.
 class LiveScreen extends StatefulWidget {
   final String host;
   final bool soundEnabled;
@@ -22,12 +25,15 @@ class LiveScreen extends StatefulWidget {
 }
 
 class _LiveScreenState extends State<LiveScreen> {
+  final AudioPlayer _audioPlayer = AudioPlayer();
   WsService? _ws;
+
   bool _connected = false;
   bool _piConnected = false;
   bool _sendingCommand = false;
   PostureStatus? _status;
   LiveAlert? _activeAlert;
+  PostureSnapshot? _latestAlertSnapshot;
   CommandResult? _lastCommandResult;
 
   @override
@@ -54,18 +60,44 @@ class _LiveScreenState extends State<LiveScreen> {
       },
       onStatus: (status) {
         if (!mounted) return;
+        final wasAlertActive = _activeAlert != null;
+        final isNowClear = !status.postureAlert && !status.distanceAlert;
+
         setState(() {
           _status = status;
-          // Backend spec: clear the alert banner when status arrives with both alerts false.
-          if (!status.postureAlert && !status.distanceAlert) {
+          // Clear the alert banner when status arrives with both alerts false.
+          if (isNowClear) {
             _activeAlert = null;
+            _latestAlertSnapshot = null;
           }
         });
+
+        // Play the recovery sound when transitioning from an active alert back to good posture.
+        if (wasAlertActive && isNowClear) {
+          _playSound('sounds/alert_end.mp3');
+        }
       },
       onAlert: (alert) {
         if (!mounted) return;
-        setState(() => _activeAlert = alert);
-        _triggerFeedback();
+        setState(() {
+          _activeAlert = alert;
+          _latestAlertSnapshot = null;
+        });
+        _playSound('sounds/alert_start.mp3');
+        _triggerVibration();
+      },
+      onSnapshot: (snap) {
+        if (!mounted) return;
+        final resolvedUrl = ApiService(widget.host).resolveMediaUrl(snap.imageUrl);
+        setState(() {
+          _latestAlertSnapshot = PostureSnapshot(
+            id: snap.id,
+            eventId: snap.eventId,
+            ts: snap.ts,
+            label: snap.label,
+            imageUrl: resolvedUrl,
+          );
+        });
       },
       onDeviceChanged: (piOnline) {
         if (mounted) setState(() => _piConnected = piOnline);
@@ -74,6 +106,27 @@ class _LiveScreenState extends State<LiveScreen> {
         if (mounted) setState(() => _lastCommandResult = result);
       },
     )..connect();
+  }
+
+  Future<void> _playSound(String assetPath) async {
+    if (!widget.soundEnabled) return;
+    try {
+      await _audioPlayer.stop();
+      await _audioPlayer.play(AssetSource(assetPath));
+    } catch (_) {
+      // Ignore if asset file hasn't been added yet or browser blocks autoplay before user tap
+    }
+  }
+
+  Future<void> _triggerVibration() async {
+    if (!widget.vibrateEnabled || kIsWeb) return;
+    try {
+      if (await Vibration.hasVibrator()) {
+        await Vibration.vibrate(duration: 500);
+      }
+    } catch (_) {
+      // Ignore on devices without a vibration motor
+    }
   }
 
   Future<void> _sendCalibration(String command) async {
@@ -90,20 +143,10 @@ class _LiveScreenState extends State<LiveScreen> {
     }
   }
 
-  /// Play system alert sound and/or vibrate based on Settings.
-  /// Both calls safely no-op on Flutter Web so Chrome dev never crashes.
-  void _triggerFeedback() {
-    if (widget.soundEnabled) {
-      SystemSound.play(SystemSoundType.alert);
-    }
-    if (widget.vibrateEnabled) {
-      HapticFeedback.vibrate();
-    }
-  }
-
   @override
   void dispose() {
     _ws?.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -162,34 +205,52 @@ class _LiveScreenState extends State<LiveScreen> {
             color: Colors.red.shade700,
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 32),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _activeAlert!.kind.toUpperCase(),
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
+                  Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 32),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _activeAlert!.kind.toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _activeAlert!.message,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _activeAlert!.message,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+                  if (_latestAlertSnapshot != null) ...[
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        _latestAlertSnapshot!.imageUrl,
+                        height: 160,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

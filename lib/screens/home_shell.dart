@@ -31,8 +31,13 @@ class _HomeShellState extends State<HomeShell> {
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
+    final savedHost = prefs.getString('server_host');
+    if (savedHost == null) {
+      await prefs.setString('server_host', _host);
+    }
+
     setState(() {
-      _host = prefs.getString('server_host') ?? _host;
+      _host = savedHost ?? _host;
       _soundEnabled = prefs.getBool('alert_sound') ?? true;
       _vibrateEnabled = prefs.getBool('alert_vibrate') ?? true;
       _prefsLoaded = true;
@@ -107,7 +112,7 @@ class _HomeShellState extends State<HomeShell> {
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Alert Sound'),
+                      title: const Text('Alert Sounds (Start & End)'),
                       value: tempSound,
                       onChanged: (v) => setDialogState(() => tempSound = v),
                     ),
@@ -157,7 +162,7 @@ class _HomeShellState extends State<HomeShell> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    // IndexedStack keeps the WebSocket alive on the Live tab even while viewing Charts or History.
+    // IndexedStack keeps the WebSocket alive on the Live tab even while viewing Charts or Alerts.
     final pages = [
       LiveScreen(
         host: _host,

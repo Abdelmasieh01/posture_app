@@ -11,6 +11,7 @@ class WsService {
   final void Function(LiveAlert alert) onAlert;
   final void Function(bool piConnected) onDeviceChanged;
   final void Function(CommandResult result) onCommandResult;
+  final void Function(PostureSnapshot snapshot) onSnapshot;
 
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
@@ -24,6 +25,7 @@ class WsService {
     required this.onAlert,
     required this.onDeviceChanged,
     required this.onCommandResult,
+    required this.onSnapshot,
   });
 
   String get _wsUrl {
@@ -47,6 +49,14 @@ class WsService {
         (rawMessage) {
           final map = jsonDecode(rawMessage as String) as Map<String, dynamic>;
           final type = map['type'] as String?;
+
+          // Note: "snapshot" broadcasts are flat JSON objects (no nested "data" key),
+          // whereas "status", "alert", "device", and "command_result" wrap fields in "data".
+          if (type == 'snapshot') {
+            onSnapshot(PostureSnapshot.fromJson(map));
+            return;
+          }
+
           final data = map['data'] as Map<String, dynamic>?;
           if (data == null) return;
 

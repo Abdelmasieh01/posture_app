@@ -14,6 +14,17 @@ class ApiService {
   Uri _uri(String path, [Map<String, String>? query]) =>
       Uri.http(_cleanHost, path, query);
 
+  /// Rewrites localhost/127.0.0.1 in backend-generated image URLs to match the configured host,
+  /// so snapshots uploaded or created in Admin on a laptop still load on a physical Android phone.
+  String resolveMediaUrl(String rawUrl) {
+    final parsed = Uri.tryParse(rawUrl);
+    if (parsed == null) return rawUrl;
+    if (parsed.host == 'localhost' || parsed.host == '127.0.0.1' || parsed.host == 'testserver') {
+      return Uri.http(_cleanHost, parsed.path).toString();
+    }
+    return rawUrl;
+  }
+
   /// GET /api/health/ -> returns true if backend responds with {"ok": true}
   Future<bool> checkHealth() async {
     try {
@@ -67,6 +78,31 @@ class ApiService {
     }
     final list = jsonDecode(res.body) as List<dynamic>;
     return list.map((e) => AlertEvent.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// GET /api/snapshots/?event_id=...
+  Future<List<PostureSnapshot>> fetchSnapshots({String? eventId}) async {
+    final query = <String, String>{};
+    if (eventId != null && eventId.isNotEmpty) {
+      query['event_id'] = eventId;
+    }
+    final res = await http
+        .get(_uri('/api/snapshots/', query.isEmpty ? null : query))
+        .timeout(const Duration(seconds: 6));
+    if (res.statusCode != 200) {
+      throw Exception('Failed to load snapshots (${res.statusCode})');
+    }
+    final list = jsonDecode(res.body) as List<dynamic>;
+    return list.map((e) {
+      final snap = PostureSnapshot.fromJson(e as Map<String, dynamic>);
+      return PostureSnapshot(
+        id: snap.id,
+        eventId: snap.eventId,
+        ts: snap.ts,
+        label: snap.label,
+        imageUrl: resolveMediaUrl(snap.imageUrl),
+      );
+    }).toList();
   }
 
   /// GET /api/summary/?granularity=hour|day

@@ -78,6 +78,32 @@ class CommandResult {
   }
 }
 
+class PostureSnapshot {
+  final int? id;
+  final String eventId;
+  final DateTime ts;
+  final String label;
+  final String imageUrl;
+
+  PostureSnapshot({
+    this.id,
+    required this.eventId,
+    required this.ts,
+    required this.label,
+    required this.imageUrl,
+  });
+
+  factory PostureSnapshot.fromJson(Map<String, dynamic> json) {
+    return PostureSnapshot(
+      id: json['id'] as int?,
+      eventId: json['event_id'] as String? ?? '',
+      ts: DateTime.parse(json['ts'] as String).toLocal(),
+      label: json['label'] as String? ?? '',
+      imageUrl: json['image_url'] as String? ?? '',
+    );
+  }
+}
+
 class AlertEvent {
   final String eventId;
   final DateTime ts;
